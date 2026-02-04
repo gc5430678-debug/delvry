@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "28890702546",
+    "project_id": "marcting-2b889",
+    "storage_bucket": "marcting-2b889.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:28890702546:android:96834ebd80e492475d030b",
+        "android_client_info": {
+          "package_name": "com.hasn299.delvre"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAKcpsGFIXwERu0txYxjDwO7EoeeSRFxyw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
