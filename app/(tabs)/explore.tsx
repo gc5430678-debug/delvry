@@ -23,12 +23,12 @@ export default function App() {
   const locationInterval = useRef(null);
 
   useEffect(() => {
-    fetchOrders();
-    const interval = setInterval(fetchOrders, 5000); // تحديث الطلبات كل 5 ثواني
+    getDelverData().then(fetchOrders);
+    const interval = setInterval(fetchOrders, 5000);
     return () => clearInterval(interval);
   }, []);
 
-  // ================= تحديث الموقع تلقائي =================
+  // ================= تحديث الموقع =================
   useEffect(() => {
     const updateLocation = async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -39,40 +39,48 @@ export default function App() {
         const newLocation = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
         setLocation(newLocation);
 
-        // إرسال الموقع للسيرفر
         if (delverEmail) {
-          try {
-            await axios.post('https://back-end-nodejs-production-d9de.up.railway.app/api/delver/update-location', {
+          await axios.post(
+            'https://back-end-nodejs-production-d9de.up.railway.app/api/delver/update-location',
+            {
               email: delverEmail,
               latitude: newLocation.latitude,
               longitude: newLocation.longitude
-            });
-          } catch (err) {
-            console.log('خطأ في تحديث الموقع:', err.message);
-          }
+            }
+          );
         }
-      }, 5000); // كل 5 ثواني
+      }, 3000);
     };
 
     updateLocation();
-
-    return () => {
-      if (locationInterval.current) clearInterval(locationInterval.current);
-    };
+    return () => locationInterval.current && clearInterval(locationInterval.current);
   }, [delverEmail]);
+
+  // ================= بيانات المندوب =================
+  const getDelverData = async () => {
+    const name = await AsyncStorage.getItem('name');
+    const email = await AsyncStorage.getItem('email');
+    setDelverName(name || 'مندوب');
+    setDelverEmail(email || '');
+  };
 
   // ================= جلب الطلبات =================
   const fetchOrders = async () => {
     try {
+      const email = await AsyncStorage.getItem('email');
+      if (!email) return;
+
       const res = await axios.get(
         "https://back-end-nodejs-production-d9de.up.railway.app/api/delver/all"
       );
 
       const allOrders = [];
       res.data.users.forEach(user => {
-        const products = Array.isArray(user.products) ? user.products : [];
-        const clientGroups = {};
+        const products = Array.isArray(user.products)
+          ? user.products.filter(p => p.delverEmail === email)
+          : [];
 
+        const clientGroups = {};
         products.forEach(p => {
           const key = `${p.clientName}-${p.clientPhone}`;
           if (!clientGroups[key]) clientGroups[key] = [];
@@ -80,16 +88,17 @@ export default function App() {
         });
 
         Object.keys(clientGroups).forEach(key => {
-          const clientProducts = clientGroups[key];
+          const items = clientGroups[key];
           allOrders.push({
             id: key,
-            clientName: clientProducts[0].clientName,
-            clientPhone: clientProducts[0].clientPhone,
-            clientLocation: clientProducts[0].clientLocation,
-            items: clientProducts,
-            totalPrice: clientProducts.reduce((sum, i) => sum + i.price * i.quantity, 0),
-            accepted: clientProducts[0].accepted || false,
-            email: user.email
+            clientName: items[0].clientName,
+            clientPhone: items[0].clientPhone,
+            clientLocation: items[0].clientLocation,
+            items,
+            totalPrice: items.reduce((s, i) => s + i.price * i.quantity, 0),
+            accepted: items[0].accepted || false,
+            delivered: items[0].delivered || false,
+            email
           });
         });
       });
@@ -100,58 +109,57 @@ export default function App() {
     }
   };
 
-  // ================= فتح الموقع =================
   const openGoogleMaps = (location) => {
     if (!location) return;
-    const url = `https://www.google.com/maps?q=${location}`;
-    Linking.openURL(url);
+    Linking.openURL(`https://www.google.com/maps?q=${location}`);
   };
 
-  // ================= اتصال =================
   const callClient = (phone) => {
     if (!phone) return;
     Linking.openURL(`tel:${phone}`);
   };
 
-  // ================= الحصول على بيانات المندوب =================
-  const getDelverData = async () => {
-    const name = await AsyncStorage.getItem('name');
-    const email = await AsyncStorage.getItem('email');
-    setDelverName(name || 'مندوب');
-    setDelverEmail(email || 'no-email@example.com');
-  };
-
   // ================= قبول الطلب =================
   const acceptOrder = async (order) => {
     try {
-      await getDelverData();
+      if (!order.accepted) {
+        await axios.post(
+          'https://back-end-nodejs-production-d9de.up.railway.app/api/delver/accept-order',
+          {
+            clientName: order.clientName,
+            clientPhone: order.clientPhone,
+            email: order.email,
+            delverName,
+            delverEmail,
+            latitude: location.latitude,
+            longitude: location.longitude
+          }
+        );
+        Alert.alert("✅ تم قبول الطلب");
+      }
 
-      // إرسال البيانات للسيرفر مع الموقع الحالي
-      await axios.post(
-        'https://back-end-nodejs-production-d9de.up.railway.app/api/delver/accept-order',
-        {
-          clientName: order.clientName,
-          clientPhone: order.clientPhone,
-          email: order.email,
-          delverName,
-          delverEmail,
-          latitude: location.latitude,
-          longitude: location.longitude
-        }
-      );
-
-      Alert.alert("✅ تم قبول الطلب");
-
-      // تحديث حالة الطلب في الواجهة مباشرة
       setOrders(prev =>
         prev.map(o =>
           o.id === order.id ? { ...o, accepted: true } : o
         )
       );
-    } catch (err) {
-      console.error(err);
-      Alert.alert("❌ فشل قبول الطلب");
+    } catch {
+      Alert.alert("❌ فشل العملية");
     }
+  };
+
+  // ================= تسليم الطلب =================
+  const deliverOrder = (order) => {
+    if (!order.accepted) {
+      Alert.alert("⚠️ يجب قبول الطلب أولاً قبل التسليم");
+      return;
+    }
+
+    setOrders(prev =>
+      prev.map(o =>
+        o.id === order.id ? { ...o, delivered: true } : o
+      )
+    );
   };
 
   return (
@@ -161,67 +169,69 @@ export default function App() {
       {orders.length === 0 && <Text>لا يوجد طلبات</Text>}
 
       {orders.map(order => (
-        <View 
-          key={order.id} 
+        <View
+          key={order.id}
           style={[
-            styles.clientCard, 
-            order.accepted ? { backgroundColor: '#d4fcd4' } : null
+            styles.clientCard,
+            order.accepted && { backgroundColor: '#d1fae5' }
           ]}
         >
-          {/* بيانات العميل */}
           <TouchableOpacity onPress={() =>
             setExpandedClientId(expandedClientId === order.id ? null : order.id)
           }>
-            <Text style={{ fontWeight: 'bold', fontSize: 16 }}>👤 {order.clientName}</Text>
+            <Text style={{ fontWeight: 'bold' }}>👤 {order.clientName}</Text>
             <Text>📞 {order.clientPhone}</Text>
             <Text>📍 {order.clientLocation}</Text>
-            <Text>💰 المجموع: {order.totalPrice} IQD</Text>
+            <Text>💰 {order.totalPrice} IQD</Text>
           </TouchableOpacity>
 
           {/* زر الموقع */}
-          <TouchableOpacity
-            style={styles.mapButton}
-            onPress={() => openGoogleMaps(order.clientLocation)}
-          >
-            <Text style={styles.mapButtonText}>📍 افتح الموقع</Text>
+          <TouchableOpacity style={styles.mapButton} onPress={() => openGoogleMaps(order.clientLocation)}>
+            <Text style={styles.mapButtonText}>📍 الموقع</Text>
           </TouchableOpacity>
 
           {/* زر الاتصال */}
-          <TouchableOpacity
-            style={styles.callButton}
-            onPress={() => callClient(order.clientPhone)}
-          >
-            <Text style={styles.callButtonText}>📞 اتصال بالعميل</Text>
+          <TouchableOpacity style={styles.callButton} onPress={() => callClient(order.clientPhone)}>
+            <Text style={styles.callButtonText}>📞 اتصال</Text>
           </TouchableOpacity>
 
-          {/* زر قبول الطلب / تم القبول */}
-          {!order.accepted ? (
-            <TouchableOpacity
-              style={styles.doneButton}
-              onPress={() => acceptOrder(order)}
-            >
-              <Text style={styles.doneButtonText}>✅ قبول الطلب</Text>
-            </TouchableOpacity>
-          ) : (
-            <View style={[styles.doneButton, { backgroundColor: '#34d399' }]}>
-              <Text style={styles.doneButtonText}>
-                ✅ تم قبول الطلب
-              </Text>
-            </View>
-          )}
+          {/* زر قبول الطلب */}
+          <TouchableOpacity
+            style={[styles.doneButton, order.accepted && { backgroundColor: '#22c55e' }]}
+            onPress={() => acceptOrder(order)}
+          >
+            <Text style={styles.doneButtonText}>
+              {order.accepted ? "✅ تم قبول الطلب" : "📦 قبول الطلب"}
+            </Text>
+          </TouchableOpacity>
 
-          {/* المنتجات */}
-          {expandedClientId === order.id && order.items.length > 0 && (
-            <View style={{ marginTop: 10 }}>
-              {order.items.map((item, index) => (
-                <View key={item.title + index} style={styles.productCard}>
+          {/* زر تم تسليم الطلب */}
+          <TouchableOpacity
+            style={[
+              styles.deliverButton,
+              order.delivered && styles.delivered,
+              !order.accepted && { opacity: 0.5 } // غير مفعل إذا لم يتم القبول
+            ]}
+            disabled={!order.accepted}
+            onPress={() => deliverOrder(order)}
+          >
+            <Text style={[styles.deliverText, order.delivered && { color: 'red' }]}>
+              🚚 تم تسليم الطلب
+            </Text>
+          </TouchableOpacity>
+
+          {/* عرض المنتجات */}
+          {expandedClientId === order.id && (
+            <View>
+              {order.items.map((item, i) => (
+                <View key={i} style={styles.productCard}>
                   <Image
                     source={{ uri: `https://categories-relationship-plaintiff-engineers.trycloudflare.com${item.image}` }}
-                    style={{ height: 120, marginBottom: 5 }}
+                    style={{ height: 120 }}
                   />
                   <Text>{item.title}</Text>
                   <Text>الكمية: {item.quantity}</Text>
-                  <Text>السعر: {item.price} IQD</Text>
+                  <Text>السعر: {item.price}</Text>
                 </View>
               ))}
             </View>
@@ -236,34 +246,20 @@ const styles = StyleSheet.create({
   header: { fontSize: 18, fontWeight: 'bold', marginBottom: 10 },
   clientCard: { backgroundColor: '#ddd', padding: 15, borderRadius: 10, marginBottom: 15 },
   productCard: { backgroundColor: '#eee', padding: 15, borderRadius: 10, marginBottom: 10 },
-
-  mapButton: {
-    backgroundColor: '#1e90ff',
-    padding: 10,
-    borderRadius: 8,
-    marginTop: 10,
-    alignItems: 'center'
-  },
-  mapButtonText: { color: '#fff', fontWeight: 'bold' },
-
-  callButton: {
-    backgroundColor: '#28a745',
-    padding: 10,
-    borderRadius: 8,
-    marginTop: 8,
-    alignItems: 'center'
-  },
-  callButtonText: { color: '#fff', fontWeight: 'bold' },
-
-  doneButton: {
-    backgroundColor: '#ff9800',
+  mapButton: { backgroundColor: '#1e90ff', padding: 10, borderRadius: 8, marginTop: 8 },
+  mapButtonText: { color: '#fff' },
+  callButton: { backgroundColor: '#28a745', padding: 10, borderRadius: 8, marginTop: 8 },
+  callButtonText: { color: '#fff' },
+  doneButton: { backgroundColor: '#ff9800', padding: 12, borderRadius: 8, marginTop: 8 },
+  doneButtonText: { color: '#fff', fontWeight: 'bold' },
+  deliverButton: {
+    borderWidth: 2,
+    borderColor: 'red',
     padding: 12,
     borderRadius: 8,
     marginTop: 8,
-    alignItems: 'center'
+    backgroundColor: 'transparent'
   },
-  doneButtonText: {
-    color: '#fff',
-    fontWeight: 'bold'
-  }
+  delivered: { opacity: 0.4 },
+  deliverText: { fontWeight: 'bold', textAlign: 'center' }
 });
