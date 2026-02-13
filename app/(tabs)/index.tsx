@@ -13,7 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import { WebView } from 'react-native-webview';
 
-const BASE_URL = "https://back-end-nodejs-production-d9de.up.railway.app/api/delver";
+const BASE_URL = "https://back-end-nodejs-production-fdc5.up.railway.app/api/delver";
 
 export default function App() {
   const [name, setName] = useState('');
@@ -61,12 +61,21 @@ export default function App() {
       return;
     }
 
-    const loc = await Location.getCurrentPositionAsync({});
-    const { latitude, longitude } = loc.coords;
+    try {
+      const loc = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced
+      });
+      const { latitude, longitude } = loc.coords;
 
-    setTempRegion({ latitude, longitude });
-    setLocationText(`${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
-    setMapVisible(true);
+      setTempRegion({ latitude, longitude });
+      setLocationText(`${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
+      setMapVisible(true);
+    } catch (err) {
+      Alert.alert(
+        'الموقع غير متوفر',
+        'تأكد من تفعيل خدمات الموقع (GPS) في إعدادات الجهاز ثم أعد المحاولة.'
+      );
+    }
   };
 
   // ================= SAVE LOCATION =================
